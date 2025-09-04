@@ -16,6 +16,7 @@ services:
       - WEBHOOK_FORMAT=json
       - SESSION_DEVICE_NAME=WuzAPI
       - LOG_LEVEL=info
+      - FRONTEND_URL=http://localhost:5173
       # RabbitMQ configuration Optional
       - RABBITMQ_URL=amqp://wuzapi:wuzapi@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events

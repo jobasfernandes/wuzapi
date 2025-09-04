@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/justinas/alice"
@@ -43,8 +44,62 @@ func (s *server) routes() {
 			Logger()
 	}
 
+	var corsOrigins []string
+	if v := os.Getenv("FRONTEND_URL"); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if idx := strings.Index(o, "#"); idx >= 0 {
+				o = o[:idx]
+			}
+			o = strings.TrimSpace(o)
+			if o != "" {
+				corsOrigins = append(corsOrigins, o)
+			}
+		}
+	} else {
+		corsOrigins = []string{"http://localhost:5173"}
+	}
+
+	allowOrigin := func(reqOrigin string) string {
+		if reqOrigin == "" {
+			return corsOrigins[0]
+		}
+		for _, o := range corsOrigins {
+			if o == reqOrigin {
+				return o
+			}
+		}
+		if len(corsOrigins) == 1 {
+			return corsOrigins[0]
+		}
+		return ""
+	}
+
+	corsMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := allowOrigin(r.Header.Get("Origin"))
+			if origin != "" {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Token, token, Content-Type, Accept, Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+
 	adminRoutes := s.router.PathPrefix("/admin").Subrouter()
+	adminRoutes.Use(corsMiddleware)
 	adminRoutes.Use(s.authadmin)
+
+	adminRoutes.HandleFunc("/{path:.*}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}).Methods("OPTIONS")
+
 	adminRoutes.Handle("/users", s.ListUsers()).Methods("GET")
 	adminRoutes.Handle("/users/{id}", s.ListUsers()).Methods("GET")
 	adminRoutes.Handle("/users", s.AddUser()).Methods("POST")
@@ -52,6 +107,7 @@ func (s *server) routes() {
 	adminRoutes.Handle("/users/{id}/full", s.DeleteUserComplete()).Methods("DELETE")
 
 	c := alice.New()
+	c = c.Append(func(h http.Handler) http.Handler { return corsMiddleware(h) })
 	c = c.Append(s.authalice)
 	c = c.Append(hlog.NewHandler(routerLog))
 
@@ -70,6 +126,18 @@ func (s *server) routes() {
 	c = c.Append(hlog.UserAgentHandler("user_agent"))
 	c = c.Append(hlog.RefererHandler("referer"))
 	c = c.Append(hlog.RequestIDHandler("req_id", "Request-Id"))
+
+	s.router.HandleFunc("/{path:.*}", func(w http.ResponseWriter, r *http.Request) {
+		origin := allowOrigin(r.Header.Get("Origin"))
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Token, token, Content-Type, Accept, Origin")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.WriteHeader(http.StatusNoContent)
+	}).Methods("OPTIONS")
 
 	s.router.Handle("/session/connect", c.Then(s.Connect())).Methods("POST")
 	s.router.Handle("/session/disconnect", c.Then(s.Disconnect())).Methods("POST")
