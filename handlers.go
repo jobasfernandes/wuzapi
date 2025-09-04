@@ -4756,40 +4756,44 @@ func (s *server) GetS3Config() http.HandlerFunc {
 		txtid := r.Context().Value("userinfo").(Values).Get("Id")
 
 		var config struct {
-			Enabled       bool   `json:"enabled"`
-			Endpoint      string `json:"endpoint"`
-			Region        string `json:"region"`
-			Bucket        string `json:"bucket"`
-			AccessKey     string `json:"access_key"`
-			PathStyle     bool   `json:"path_style"`
-			PublicURL     string `json:"public_url"`
-			MediaDelivery string `json:"media_delivery"`
-			RetentionDays int    `json:"retention_days"`
+			Enabled       bool   `json:"enabled" db:"enabled"`
+			Endpoint      string `json:"endpoint" db:"endpoint"`
+			Region        string `json:"region" db:"region"`
+			Bucket        string `json:"bucket" db:"bucket"`
+			AccessKey     string `json:"access_key" db:"access_key"`
+			PathStyle     bool   `json:"path_style" db:"path_style"`
+			PublicURL     string `json:"public_url" db:"public_url"`
+			MediaDelivery string `json:"media_delivery" db:"media_delivery"`
+			RetentionDays int    `json:"retention_days" db:"retention_days"`
 		}
 
 		err := s.db.Get(&config, `
 			SELECT 
-				s3_enabled as enabled,
-				s3_endpoint as endpoint,
-				s3_region as region,
-				s3_bucket as bucket,
-				s3_access_key as access_key,
-				s3_path_style as path_style,
-				s3_public_url as public_url,
-				media_delivery,
-				s3_retention_days as retention_days
+				COALESCE(s3_enabled, false) as enabled,
+				COALESCE(s3_endpoint, '') as endpoint,
+				COALESCE(s3_region, '') as region,
+				COALESCE(s3_bucket, '') as bucket,
+				COALESCE(s3_access_key, '') as access_key,
+				COALESCE(s3_path_style, false) as path_style,
+				COALESCE(s3_public_url, '') as public_url,
+				COALESCE(media_delivery, 'base64') as media_delivery,
+				COALESCE(s3_retention_days, 30) as retention_days
 			FROM users WHERE id = $1`, txtid)
 
 		if err != nil {
+			log.Error().Err(err).Str("userId", txtid).Msg("Failed to get S3 configuration")
 			s.Respond(w, r, http.StatusInternalServerError, errors.New("failed to get S3 configuration"))
 			return
 		}
 
 		// Don't return secret key for security
-		config.AccessKey = "***" // Mask access key
+		if config.AccessKey != "" {
+			config.AccessKey = "***"
+		}
 
 		responseJson, err := json.Marshal(config)
 		if err != nil {
+			log.Error().Err(err).Msg("Failed to marshal S3 config to JSON")
 			s.Respond(w, r, http.StatusInternalServerError, err)
 		} else {
 			s.Respond(w, r, http.StatusOK, string(responseJson))
