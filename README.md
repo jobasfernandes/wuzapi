@@ -81,15 +81,27 @@ Set `TZ=America/New_York ./wuzapi ...` in your shell or in your .env file or Doc
 
 ## Configuration
 
-WuzAPI uses a <code>.env</code> file for configuration. Here are the required settings:
+WuzAPI uses a `.env` file for configuration. You can use the provided `.env.sample` as a template:
 
-### For PostgreSQL
+```bash
+cp .env.sample .env
+```
+
+### Environment Variables
+
+#### Required Settings
 ```
 WUZAPI_ADMIN_TOKEN=your_admin_token_here
+```
+
+#### Database Configuration
+
+**For PostgreSQL:**
+```
 DB_USER=wuzapi
 DB_PASSWORD=wuzapi
 DB_NAME=wuzapi
-DB_HOST=localhost
+DB_HOST=db  # Use 'db' when running with Docker Compose, or 'localhost' for native execution
 DB_PORT=5432
 DB_SSLMODE=false
 TZ=America/New_York
@@ -98,9 +110,11 @@ SESSION_DEVICE_NAME=WuzAPI
 LOG_LEVEL=info # debug, info, warn, error
 ```
 
-### For SQLite
+**For SQLite (default):**
+No database configuration needed - SQLite is used by default if no PostgreSQL settings are provided.
+
+#### Optional Settings
 ```
-WUZAPI_ADMIN_TOKEN=your_admin_token_here
 TZ=America/New_York
 LOG_LEVEL=info # debug, info, warn, error
 ```
@@ -129,6 +143,22 @@ When enabled:
 * LOG_LEVEL: Optional - Log verbosity level (default: info)
 * PostgreSQL-specific options: Only required when using PostgreSQL backend
 * RabbitMQ options: Optional, only required if you want to publish events to RabbitMQ
+
+### Docker Configuration
+
+When using Docker Compose, `docker-compose.yml` automatically loads environment variables from a `.env` file when available. However, `docker-compose-swarm.yaml` uses `docker stack deploy`, which does not automatically load from `.env` files. Variables in the swarm file will only be substituted if they are exported in the shell environment where the deploy command is run. For managing secrets in Swarm, consider using Docker secrets.
+
+The Docker configuration will:
+1. First load variables from the `.env` file (if present and supported)
+2. Use default values as fallback if variables are not defined
+3. Override with any variables explicitly set in the `environment` section of the compose file
+
+**Key differences for Docker deployment:**
+- Set `DB_HOST=db` instead of `localhost` to connect to the PostgreSQL container
+- The `WUZAPI_PORT` variable controls the external port mapping in `docker-compose.yml`
+- In swarm mode, `WUZAPI_PORT` configures the Traefik load balancer port
+
+**Note:** The `.env` file is already included in `.gitignore` to avoid committing sensitive information to your repository.
 
 ## Usage
 
