@@ -7,6 +7,10 @@ services:
       - "8080:8080"
     environment:
       - WUZAPI_ADMIN_TOKEN=H4Zbhw72PBKdTIgS
+      - WUZAPI_GLOBAL_ENCRYPTION_KEY=your_32_byte_encryption_key_here
+      - WUZAPI_GLOBAL_HMAC_KEY=your_global_hmac_key_here_minimum_32_chars
+      # https://example.com/webhook
+      - WUZAPI_GLOBAL_WEBHOOK=
       - DB_USER=wuzapi
       - DB_PASSWORD=wuzapi
       - DB_NAME=wuzapi
@@ -50,6 +54,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
+    hostname: rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: wuzapi
       RABBITMQ_DEFAULT_PASS: wuzapi

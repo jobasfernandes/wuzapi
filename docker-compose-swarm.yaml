@@ -49,6 +49,7 @@ services:
   # RabbitMQ service OPTIONAL
   rabbitmq:
     image: rabbitmq:3-management
+    hostname: rabbitmq
     networks:
       - network_public
     environment:
