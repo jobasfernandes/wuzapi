@@ -256,7 +256,7 @@ func (s *server) connectOnStartup() {
 			eventstring := strings.Join(subscribedEvents, ",")
 			log.Info().Str("events", eventstring).Str("jid", jid).Msg("Attempt to connect")
 			killchannel[txtid] = make(chan bool)
-			go s.startClient(txtid, jid, token, subscribedEvents)
+			go s.startClient(txtid, jid, token, subscribedEvents, "qr")
 
 			// Initialize S3 client if configured
 			go func(userID string) {
@@ -331,7 +331,7 @@ func parseJID(arg string) (types.JID, bool) {
 	}
 }
 
-func (s *server) startClient(userID string, textjid string, token string, subscriptions []string) {
+func (s *server) startClient(userID string, textjid string, token string, subscriptions []string, pairingMode string) {
 	log.Info().Str("userid", userID).Str("jid", textjid).Msg("Starting websocket connection to Whatsapp")
 
 	var deviceStore *store.Device
@@ -413,85 +413,73 @@ func (s *server) startClient(userID string, textjid string, token string, subscr
 	clientManager.SetHTTPClient(userID, httpClient)
 
 	if client.Store.ID == nil {
-		// No ID stored, new login
-		qrChan, err := client.GetQRChannel(context.Background())
-		if err != nil {
-			// This error means that we're already logged in, so ignore it.
-			if !errors.Is(err, whatsmeow.ErrQRStoreContainsID) {
-				log.Error().Err(err).Msg("Failed to get QR channel")
-				return
-			}
-		} else {
-			err = client.Connect() // Si no conectamos no se puede generar QR
+		if pairingMode == "phone" {
+			err = client.Connect()
 			if err != nil {
-				log.Error().Err(err).Msg("Failed to connect client")
+				log.Error().Err(err).Msg("Failed to connect client (phone mode)")
 				return
 			}
-
-			myuserinfo, found := userinfocache.Get(token)
-
-			for evt := range qrChan {
-				if evt.Event == "code" {
-					// Display QR code in terminal (useful for testing/developing)
-					if *logType != "json" {
-						qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-						fmt.Println("QR code:\n", evt.Code)
-					}
-					// Store encoded/embeded base64 QR on database for retrieval with the /qr endpoint
-					image, _ := qrcode.Encode(evt.Code, qrcode.Medium, 256)
-					base64qrcode := "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
-					sqlStmt := `UPDATE users SET qrcode=$1 WHERE id=$2`
-					_, err := s.db.Exec(sqlStmt, base64qrcode, userID)
-					if err != nil {
-						log.Error().Err(err).Msg(sqlStmt)
-					} else {
-						if found {
+			log.Info().Str("userID", userID).Msg("Client connected em modo 'phone' aguardando PairPhone")
+		} else {
+			qrChan, err := client.GetQRChannel(context.Background())
+			if err != nil {
+				if !errors.Is(err, whatsmeow.ErrQRStoreContainsID) {
+					log.Error().Err(err).Msg("Failed to get QR channel")
+					return
+				}
+			} else {
+				err = client.Connect()
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to connect client")
+					return
+				}
+				myuserinfo, found := userinfocache.Get(token)
+				for evt := range qrChan {
+					if evt.Event == "code" {
+						if *logType != "json" {
+							qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+							fmt.Println("QR code:\n", evt.Code)
+						}
+						image, _ := qrcode.Encode(evt.Code, qrcode.Medium, 256)
+						base64qrcode := "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
+						sqlStmt := `UPDATE users SET qrcode=$1 WHERE id=$2`
+						_, err := s.db.Exec(sqlStmt, base64qrcode, userID)
+						if err != nil {
+							log.Error().Err(err).Msg(sqlStmt)
+						} else if found {
 							v := updateUserInfo(myuserinfo, "Qrcode", base64qrcode)
 							userinfocache.Set(token, v, cache.NoExpiration)
-							log.Info().Str("qrcode", base64qrcode).Msg("update cache userinfo with qr code")
 						}
-					}
-
-					//send QR code with webhook
-					postmap := make(map[string]interface{})
-					postmap["event"] = evt.Event
-					postmap["qrCodeBase64"] = base64qrcode
-					postmap["type"] = "QR"
-
-					sendEventWithWebHook(&mycli, postmap, "")
-
-				} else if evt.Event == "timeout" {
-					// Clear QR code from DB on timeout
-					sqlStmt := `UPDATE users SET qrcode='' WHERE id=$1`
-					_, err := s.db.Exec(sqlStmt, userID)
-					if err != nil {
-						log.Error().Err(err).Msg(sqlStmt)
-					} else {
+						postmap := map[string]interface{}{"event": evt.Event, "qrCodeBase64": base64qrcode, "type": "QR"}
+						sendEventWithWebHook(&mycli, postmap, "")
+					} else if evt.Event == "timeout" {
+						sqlStmt := `UPDATE users SET qrcode='' WHERE id=$1`
+						_, err := s.db.Exec(sqlStmt, userID)
+						if err != nil {
+							log.Error().Err(err).Msg(sqlStmt)
+						}
 						if found {
 							v := updateUserInfo(myuserinfo, "Qrcode", "")
 							userinfocache.Set(token, v, cache.NoExpiration)
 						}
-					}
-					log.Warn().Msg("QR timeout killing channel")
-					clientManager.DeleteWhatsmeowClient(userID)
-					clientManager.DeleteMyClient(userID)
-					clientManager.DeleteHTTPClient(userID)
-					killchannel[userID] <- true
-				} else if evt.Event == "success" {
-					log.Info().Msg("QR pairing ok!")
-					// Clear QR code after pairing
-					sqlStmt := `UPDATE users SET qrcode='', connected=1 WHERE id=$1`
-					_, err := s.db.Exec(sqlStmt, userID)
-					if err != nil {
-						log.Error().Err(err).Msg(sqlStmt)
-					} else {
-						if found {
+						log.Warn().Msg("QR timeout killing channel")
+						clientManager.DeleteWhatsmeowClient(userID)
+						clientManager.DeleteMyClient(userID)
+						clientManager.DeleteHTTPClient(userID)
+						killchannel[userID] <- true
+					} else if evt.Event == "success" {
+						sqlStmt := `UPDATE users SET qrcode='', connected=1 WHERE id=$1`
+						_, err := s.db.Exec(sqlStmt, userID)
+						if err != nil {
+							log.Error().Err(err).Msg(sqlStmt)
+						} else if found {
 							v := updateUserInfo(myuserinfo, "Qrcode", "")
 							userinfocache.Set(token, v, cache.NoExpiration)
 						}
+						log.Info().Msg("QR pairing ok!")
+					} else {
+						log.Info().Str("event", evt.Event).Msg("Login event")
 					}
-				} else {
-					log.Info().Str("event", evt.Event).Msg("Login event")
 				}
 			}
 		}
@@ -515,7 +503,7 @@ func (s *server) startClient(userID string, textjid string, token string, subscr
 			clientManager.DeleteMyClient(userID)
 			clientManager.DeleteHTTPClient(userID)
 			sqlStmt := `UPDATE users SET qrcode='', connected=0 WHERE id=$1`
-			_, err := s.db.Exec(sqlStmt, "", userID)
+			_, err := s.db.Exec(sqlStmt, userID)
 			if err != nil {
 				log.Error().Err(err).Msg(sqlStmt)
 			}

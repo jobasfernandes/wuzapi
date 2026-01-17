@@ -121,6 +121,7 @@ func (s *server) Connect() http.HandlerFunc {
 	type connectStruct struct {
 		Subscribe []string
 		Immediate bool
+		Method string
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +176,14 @@ func (s *server) Connect() http.HandlerFunc {
 
 		log.Info().Str("jid", jid).Msg("Attempt to connect")
 		killchannel[txtid] = make(chan bool)
-		go s.startClient(txtid, jid, token, subscribedEvents)
+		pairingMode := strings.ToLower(strings.TrimSpace(t.Method))
+		if pairingMode == "" { pairingMode = "qr" }
+		if pairingMode != "qr" && pairingMode != "phone" {
+			log.Warn().Str("method", pairingMode).Msg("Método inválido recebido, usando 'qr'")
+			pairingMode = "qr"
+		}
+
+		go s.startClient(txtid, jid, token, subscribedEvents, pairingMode)
 
 		if t.Immediate == false {
 			log.Warn().Msg("Waiting 10 seconds")
@@ -192,7 +200,7 @@ func (s *server) Connect() http.HandlerFunc {
 			}
 		}
 
-		response := map[string]interface{}{"webhook": webhook, "jid": jid, "events": eventstring, "details": "Connected!"}
+		response := map[string]interface{}{"webhook": webhook, "jid": jid, "events": eventstring, "pairing_mode": pairingMode, "details": "Connected!"}
 		responseJson, err := json.Marshal(response)
 		if err != nil {
 			s.Respond(w, r, http.StatusInternalServerError, err)
