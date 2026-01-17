@@ -291,7 +291,7 @@ func (s *server) connectOnStartup() {
 			eventstring := strings.Join(subscribedEvents, ",")
 			log.Info().Str("events", eventstring).Str("jid", jid).Msg("Attempt to connect")
 			killchannel[txtid] = make(chan bool, 1)
-			go s.startClient(txtid, jid, token, subscribedEvents)
+			go s.startClient(txtid, jid, token, subscribedEvents, "qr")
 
 			// Initialize S3 client if configured
 			go func(userID string) {
